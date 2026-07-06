@@ -1,7 +1,11 @@
+.DS_Store
+checkpoints/
+__pycache__/
 
-.DS_Store
-.DS_Store
-.DS_Store
-.DS_Store
-.DS_Store
-.DS_Store
+# FI-2010 dataset (large, regenerable/downloadable — keep out of the repo)
+*.npy
+*_Dst_NoAuction_*.txt
+
+
+
+
