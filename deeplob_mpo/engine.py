@@ -61,7 +61,8 @@ def train_one_epoch(model, loader, optimizer, criterion, device,
     n_classes = None
     amp_ctx = torch.autocast("cuda") if scaler is not None else torch.autocast("cpu", enabled=False)
     for x, y in loader:
-        x, y = x.to(device, dtype=torch.float), y.to(device, dtype=torch.long)
+        x = x.to(device, dtype=torch.float, non_blocking=True)
+        y = y.to(device, dtype=torch.long, non_blocking=True)
         optimizer.zero_grad()
         with amp_ctx:
             out = model(x)
@@ -92,7 +93,8 @@ def evaluate(model, loader, device, criterion=None, return_metrics=False):
     n_classes = None
     amp_ctx = torch.autocast("cuda") if _is_cuda(device) else torch.autocast("cpu", enabled=False)
     for x, y in loader:
-        x, y = x.to(device, dtype=torch.float), y.to(device, dtype=torch.long)
+        x = x.to(device, dtype=torch.float, non_blocking=True)
+        y = y.to(device, dtype=torch.long, non_blocking=True)
         with amp_ctx:
             out = model(x)
             n_classes = out.shape[1]
@@ -109,29 +111,55 @@ def evaluate(model, loader, device, criterion=None, return_metrics=False):
     return loss, acc
 
 
+def _monitor_value(row: dict, monitor: str) -> tuple[float, bool]:
+    if monitor not in row:
+        valid = ", ".join(sorted(row))
+        raise ValueError(f"unknown monitor {monitor!r}; choose one of: {valid}")
+    value = row[monitor]
+    if not np.isfinite(value):
+        raise ValueError(f"monitor {monitor!r} is not finite: {value}")
+    return float(value), monitor.endswith("loss")
+
+
 def fit(model, train_loader, val_loader, *, epochs, lr, weight_decay, device,
-        ckpt_path=None, log_every=1, metrics_logger=None):
-    """Train, tracking best val accuracy. Saves best state_dict to ckpt_path."""
-    model.to(device)
+        ckpt_path=None, log_every=1, metrics_logger=None, monitor="val_acc",
+        early_stopping_patience=None, min_delta=0.0, label_smoothing=0.0):
+    """Train, tracking the best validation metric.
+
+    Saves the best state_dict to ckpt_path when provided. The default monitor
+    preserves the original behavior: maximize validation accuracy.
+    """
+    raw_model = model.to(device)
+    train_model = raw_model
     if _is_cuda(device):
         torch.backends.cudnn.benchmark = True
+        if hasattr(torch, "compile"):
+            train_model = torch.compile(raw_model)
     scaler = torch.amp.GradScaler("cuda") if _is_cuda(device) else None
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr,
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    optimizer = torch.optim.Adam(raw_model.parameters(), lr=lr,
                                  weight_decay=weight_decay)
-    best_acc, history = float("-inf"), []
+    best_acc, best_score, best_epoch, history = float("-inf"), None, None, []
+    epochs_without_improvement = 0
     for ep in range(1, epochs + 1):
         tr_loss, train_metrics = train_one_epoch(
-            model, train_loader, optimizer, criterion, device,
+            train_model, train_loader, optimizer, criterion, device,
             return_metrics=True, scaler=scaler)
         val_loss, val_metrics = evaluate(
-            model, val_loader, device, criterion, return_metrics=True)
+            train_model, val_loader, device, criterion, return_metrics=True)
         val_acc = val_metrics["accuracy"]
         row = {"epoch": ep, "train_loss": tr_loss,
                "val_loss": val_loss, "val_acc": val_acc}
         row.update({f"train_{k}": v for k, v in train_metrics.items()})
         row.update({f"val_{k}": v for k, v in val_metrics.items()})
         history.append(row)
+        score, lower_is_better = _monitor_value(row, monitor)
+        if best_score is None:
+            improved = True
+        elif lower_is_better:
+            improved = score < best_score - min_delta
+        else:
+            improved = score > best_score + min_delta
         if metrics_logger:
             metrics_logger({
                 "epoch": ep,
@@ -140,12 +168,28 @@ def fit(model, train_loader, val_loader, *, epochs, lr, weight_decay, device,
                 **{f"train/{k}": v for k, v in train_metrics.items()},
                 **{f"val/{k}": v for k, v in val_metrics.items()},
             })
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if improved:
+            best_score = score
+            best_epoch = ep
+            epochs_without_improvement = 0
             if ckpt_path:
-                torch.save(model.state_dict(), ckpt_path)
+                torch.save(raw_model.state_dict(), ckpt_path)
+        else:
+            epochs_without_improvement += 1
+        best_acc = max(best_acc, val_acc)
         if log_every and ep % log_every == 0:
             print(f"epoch {ep:3d}  train_loss {tr_loss:.4f}  "
                   f"val_loss {val_loss:.4f}  val_acc {val_acc:.4f}"
-                  f"{'  *' if val_acc == best_acc else ''}")
-    return {"best_val_acc": best_acc, "history": history}
+                  f"{'  *' if improved else ''}")
+        if (early_stopping_patience is not None
+                and epochs_without_improvement >= early_stopping_patience):
+            print(f"early stopping at epoch {ep}; best {monitor} "
+                  f"{best_score:.4f} at epoch {best_epoch}")
+            break
+    return {
+        "best_val_acc": best_acc,
+        "best_monitor": monitor,
+        "best_monitor_value": best_score,
+        "best_epoch": best_epoch,
+        "history": history,
+    }

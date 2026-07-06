@@ -54,6 +54,16 @@ def parse_args():
     g.add_argument("--batch-size", type=int, default=None)
     g.add_argument("--lr", type=float, default=None)
     g.add_argument("--weight-decay", type=float, default=None)
+    g.add_argument("--monitor", default="val_acc",
+                   choices=["val_loss", "val_acc", "val_f1_macro",
+                            "val_balanced_accuracy", "val_r2"],
+                   help="validation metric used for checkpoint selection")
+    g.add_argument("--early-stopping-patience", type=int, default=None,
+                   help="stop after this many epochs without monitor improvement")
+    g.add_argument("--min-delta", type=float, default=0.0,
+                   help="minimum monitor improvement required to reset patience")
+    g.add_argument("--label-smoothing", type=float, default=0.0,
+                   help="CrossEntropyLoss label smoothing")
     g.add_argument("--seed", type=int, default=None)
     g.add_argument("--device", default=None)
 
@@ -63,7 +73,14 @@ def parse_args():
     g.add_argument("--smoke", action="store_true",
                    help="tiny synthetic data + 2 epochs to verify the pipeline")
     add_wandb_args(p)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
+        p.error("--early-stopping-patience must be at least 1")
+    if args.min_delta < 0:
+        p.error("--min-delta must be non-negative")
+    if not 0 <= args.label_smoothing < 1:
+        p.error("--label-smoothing must be in [0, 1)")
+    return args
 
 
 def main():
@@ -91,12 +108,19 @@ def main():
     run = init_wandb(
         args, cfg, job_type="train",
         extra_config={"checkpoint": out, "smoke": args.smoke,
-                      "parameters": n_params})
+                      "parameters": n_params, "monitor": args.monitor,
+                      "early_stopping_patience": args.early_stopping_patience,
+                      "min_delta": args.min_delta,
+                      "label_smoothing": args.label_smoothing})
 
     res = fit(model, train_loader, val_loader, epochs=cfg.epochs, lr=cfg.lr,
               weight_decay=cfg.weight_decay, device=cfg.device,
               ckpt_path=out, log_every=args.log_every,
-              metrics_logger=run.log if run else None)
+              metrics_logger=run.log if run else None,
+              monitor=args.monitor,
+              early_stopping_patience=args.early_stopping_patience,
+              min_delta=args.min_delta,
+              label_smoothing=args.label_smoothing)
 
     model.load_state_dict(torch.load(out, map_location=cfg.device))
     test_loss, test_metrics = evaluate(
@@ -105,9 +129,14 @@ def main():
     log_metrics(run, "test", test_loss, test_metrics)
     if run:
         run.summary["best_val_accuracy"] = res["best_val_acc"]
+        run.summary["best_epoch"] = res["best_epoch"]
+        run.summary["best_monitor"] = res["best_monitor"]
+        run.summary["best_monitor_value"] = res["best_monitor_value"]
         run.summary["test_accuracy"] = test_acc
         run.summary["checkpoint"] = out
-    print(f"\nbest val acc: {res['best_val_acc']:.4f}   test acc: {test_acc:.4f}")
+    print(f"\nbest {res['best_monitor']}: {res['best_monitor_value']:.4f} "
+          f"at epoch {res['best_epoch']}   "
+          f"best val acc: {res['best_val_acc']:.4f}   test acc: {test_acc:.4f}")
 
     cfg_out = os.path.splitext(out)[0] + "_config.json"
     with open(cfg_out, "w") as f:

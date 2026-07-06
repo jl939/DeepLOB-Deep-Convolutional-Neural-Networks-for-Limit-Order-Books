@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/train.py --model mlp --smoke)",
+      "Bash(python scripts/compress.py --smoke)"
+    ]
+  }
+}

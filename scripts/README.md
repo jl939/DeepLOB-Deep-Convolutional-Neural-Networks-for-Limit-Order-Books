@@ -57,6 +57,36 @@ The generic training and compression flow uses only plain PyTorch modules plus
 `MPOLinear`. The DeepLOB experiment scripts also use `MPOConv2d` and
 `LinearLSTM` to expose convolution and LSTM matrices for compression.
 
+## GPU Training Tips
+
+The engine automatically enables AMP (fp16), `cudnn.benchmark`, and
+`torch.compile` on CUDA, so the main thing to tune is batch size and learning
+rate.
+
+The default batch size (64) is calibrated for CPU/MPS. On a GPU with 16 GB+
+VRAM you can safely raise it, which keeps the GPU busier and often also
+speeds up convergence. When you increase batch size you should also raise the
+learning rate proportionally (roughly: double the LR when you double the
+batch):
+
+| batch size | suggested `--lr` |
+| --- | --- |
+| 64 (default) | `1e-4` (default) |
+| 256 | `3e-4` |
+| 512 | `5e-4` |
+| 1024 | `8e-4` |
+
+Example (no `--device` needed — auto-detected):
+
+```bash
+python scripts/train.py --model mlp --epochs 50 --batch-size 512 --lr 5e-4
+python scripts/train.py --model transformer --epochs 50 --batch-size 512 --lr 5e-4 --d-model 128
+python scripts/train.py --model deeplob --epochs 50 --batch-size 512 --lr 5e-4 --head-hidden 512
+```
+
+The first epoch is slower while `torch.compile` traces the graph; subsequent
+epochs run at full speed.
+
 ## Full Generic Pipeline
 
 The intended reusable workflow is:
@@ -97,6 +127,26 @@ python scripts/train.py --model deeplob --device mps --epochs 50 --head-hidden 5
 python scripts/train.py --model mlp --data-dir /path/to/FI2010 --device cpu
 ```
 
+If training loss keeps improving while validation loss rises, select the
+checkpoint by validation loss and stop once it stalls:
+
+```bash
+python scripts/train.py \
+  --model deeplob \
+  --epochs 50 \
+  --head-hidden 256 \
+  --dropout 0.3 \
+  --weight-decay 1e-4 \
+  --label-smoothing 0.05 \
+  --monitor val_loss \
+  --early-stopping-patience 5 \
+  --wandb
+```
+
+For the curve where validation loss bottoms out near epoch 7-8 and then climbs,
+patience `4` or `5` is usually enough. Keep `--epochs 50`; early stopping will
+use the extra epochs only if validation keeps improving.
+
 By default this writes:
 
 ```text
@@ -117,6 +167,10 @@ Important options:
 | `--batch-size` | Batch size override. |
 | `--lr` | Adam learning rate. |
 | `--weight-decay` | Adam L2 regularization term. |
+| `--label-smoothing` | Cross-entropy label smoothing for classification regularization. |
+| `--monitor` | Validation metric used for checkpoint selection, for example `val_loss` or `val_acc`. |
+| `--early-stopping-patience` | Stop after this many epochs without monitor improvement. |
+| `--min-delta` | Minimum monitor improvement required to reset early-stopping patience. |
 | `--seed` | Random seed for reproducibility. |
 | `--horizon` | FI-2010 prediction horizon index, `0..4`. |
 | `--window` | Sliding-window length, default `100`. |
