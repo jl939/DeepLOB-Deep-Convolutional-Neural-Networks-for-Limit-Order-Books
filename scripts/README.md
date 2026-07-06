@@ -90,10 +90,29 @@ Important options:
 | `--device` | PyTorch device, commonly `cpu`, `cuda`, or `mps`. |
 | `--batch-size` | Batch size override. |
 | `--lr` | Adam learning rate. |
+| `--weight-decay` | Adam L2 regularization term. |
+| `--seed` | Random seed for reproducibility. |
 | `--horizon` | FI-2010 prediction horizon index, `0..4`. |
 | `--window` | Sliding-window length, default `100`. |
-| `--out` | Custom checkpoint path. |
+| `--data-dir` | Directory holding the extracted FI-2010 `.txt` files, default `jupyter_pytorch`. |
+| `--out` | Custom checkpoint path, default `checkpoints/<model>.pt`. |
+| `--log-every` | Print training progress every N epochs, default `1`. |
 | `--smoke` | Uses tiny random data and two epochs for a fast pipeline check. |
+
+Model-specific options (only affect the matching `--model`, all default to the
+`Config` values in `deeplob_mpo/config.py` when omitted):
+
+| option | applies to | meaning |
+| --- | --- | --- |
+| `--head-hidden` | `deeplob` | Hidden-layer width of the FCN classification head. Default `512`. |
+| `--head-depth` | `deeplob` | Number of hidden `Linear` layers in the FCN head. Default `2`. |
+| `--dropout` | `deeplob` | Dropout rate in the FCN head. Default `0.1`. |
+| `--mlp-hidden` | `mlp` | Width of the stem and each residual block. Default `1024`. |
+| `--mlp-blocks` | `mlp` | Number of residual blocks. Default `4`. |
+| `--d-model` | `transformer` | Transformer embedding dimension. Default `128`. |
+| `--n-heads` | `transformer` | Number of attention heads. Default `4`. |
+| `--tf-depth` | `transformer` | Number of encoder layers. Default `2`. |
+| `--ff-mult` | `transformer` | Feed-forward hidden size as a multiple of `--d-model`. Default `4`. |
 
 ### 3. Inspect Compressible Layers
 
