@@ -26,7 +26,17 @@ class Config:
     # -- model -----------------------------------------------------------------
     model: str = "deeplob"              # "deeplob" | "mlp" | "transformer"
 
-    # deeplob: CNN+LSTM backbone (64-d feature) + wide FCN head (MPO target)
+    # deeplob: CNN+LSTM backbone + FCN head. The backbone's *kernel* shapes are
+    # structural (tied to the 40-column LOB layout) and stay fixed; the width
+    # knobs below scale capacity and, crucially, the size of the MPO targets
+    # (LSTM gate matrices and inception convs). Defaults reproduce the paper.
+    conv_channels: int = 32            # channels in the 3 conv blocks
+    inception_channels: int = 64       # channels per inception branch
+    lstm_hidden: int = 64              # LSTM hidden = backbone feature width
+    #   LSTM input_size is derived as 3 * inception_channels.
+
+    # deeplob head: wide FCN on top of the backbone feature (extra MPO targets).
+    # head_depth=0 -> single Linear(lstm_hidden -> n_classes), the paper's head.
     head_hidden: int = 512
     head_depth: int = 2                 # number of hidden Linear layers
     head_dropout: float = 0.1
@@ -49,6 +59,7 @@ class Config:
     epochs: int = 50
     lr: float = 1e-4
     weight_decay: float = 1e-5          # L2 reg, the paper's alpha term (Eq. 7)
+    adam_eps: float = 1e-8              # ADAM epsilon; paper sets this to 1.0
     device: str = _DEFAULT_DEVICE       # "cuda" / "mps" / "cpu"
     seed: int = 0
 

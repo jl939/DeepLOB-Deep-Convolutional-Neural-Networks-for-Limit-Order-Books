@@ -75,8 +75,8 @@ def build_loaders(cfg) -> tuple[DataLoader, DataLoader, DataLoader]:
 
     mk = lambda raw: FI2010Dataset(raw, cfg.horizon_k, cfg.window_T)
     train_ds, val_ds, test_ds = mk(dec_train), mk(dec_val), mk(dec_test)
-    nw = min(4, multiprocessing.cpu_count())
     pin = cfg.device.startswith("cuda")
+    nw = min(8 if pin else 4, multiprocessing.cpu_count())
     kw = dict(num_workers=nw, pin_memory=pin, persistent_workers=nw > 0)
     return (
         DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, **kw),

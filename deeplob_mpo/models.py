@@ -1,7 +1,10 @@
-"""Models for FI-2010. All MPO compression targets are plain nn.Linear layers,
-so deeplob_mpo.compress works on every architecture here unchanged.
+"""Models for FI-2010. MPO compression targets are nn.Linear and nn.Conv2d
+layers; the DeepLOB LSTM is reachable via LinearLSTM (its fused gate matrices
+re-expressed as nn.Linear). deeplob_mpo.compress works on every architecture
+here unchanged.
 
-  - DeepLOBNet     : CNN+LSTM backbone + wide FCN head  (head = MPO target)
+  - DeepLOBNet     : CNN+Inception+LSTM backbone + FCN head
+                     (LSTM gates + inception convs + head = MPO targets)
   - MLPNet         : flatten window -> wide MLP         (first Linear = MPO target)
   - TransformerNet : encoder over timesteps            (attn + FFN = MPO targets)
 """
@@ -16,33 +19,44 @@ class DeepLOBBackbone(nn.Module):
     """CNN + Inception + LSTM feature extractor from Zhang et al. (DeepLOB).
 
     Input  : (B, 1, T, 40)
-    Output : (B, 64) feature vector (last LSTM timestep).
+    Output : (B, lstm_hidden) feature vector (last LSTM timestep).
+
+    The kernel shapes are *structural* -- (1,2)/(1,2)/(1,10) walk the 40-column
+    LOB layout (pair price+size, merge ask/bid, then merge all 10 levels) and
+    (4,1)/(3,1)/(5,1) are the temporal windows. Only the *widths* are tunable:
+      conv_ch       channels in the 3 conv blocks
+      inception_ch  channels per inception branch (LSTM input = 3 * inception_ch)
+      lstm_hidden   LSTM hidden size = output feature width
+    Scaling these up enlarges the MPO targets (LSTM gates, inception convs)
+    while keeping the architecture faithful to the paper (defaults = paper).
     """
 
-    def __init__(self):
+    def __init__(self, conv_ch=32, inception_ch=64, lstm_hidden=64):
         super().__init__()
+        c, e = conv_ch, inception_ch
         self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 32, (1, 2), (1, 2)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32))
+            nn.Conv2d(1, c, (1, 2), (1, 2)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c))
         self.conv2 = nn.Sequential(
-            nn.Conv2d(32, 32, (1, 2), (1, 2)), nn.Tanh(), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.Tanh(), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.Tanh(), nn.BatchNorm2d(32))
+            nn.Conv2d(c, c, (1, 2), (1, 2)), nn.Tanh(), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.Tanh(), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.Tanh(), nn.BatchNorm2d(c))
         self.conv3 = nn.Sequential(
-            nn.Conv2d(32, 32, (1, 10)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32),
-            nn.Conv2d(32, 32, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(32))
+            nn.Conv2d(c, c, (1, 10)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c),
+            nn.Conv2d(c, c, (4, 1)), nn.LeakyReLU(0.01), nn.BatchNorm2d(c))
         self.inp1 = nn.Sequential(
-            nn.Conv2d(32, 64, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(64),
-            nn.Conv2d(64, 64, (3, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(64))
+            nn.Conv2d(c, e, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(e),
+            nn.Conv2d(e, e, (3, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(e))
         self.inp2 = nn.Sequential(
-            nn.Conv2d(32, 64, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(64),
-            nn.Conv2d(64, 64, (5, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(64))
+            nn.Conv2d(c, e, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(e),
+            nn.Conv2d(e, e, (5, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(e))
         self.inp3 = nn.Sequential(
             nn.MaxPool2d((3, 1), (1, 1), (1, 0)),
-            nn.Conv2d(32, 64, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(64))
-        self.lstm = nn.LSTM(input_size=192, hidden_size=64, num_layers=1, batch_first=True)
+            nn.Conv2d(c, e, (1, 1), padding='same'), nn.LeakyReLU(0.01), nn.BatchNorm2d(e))
+        self.lstm = nn.LSTM(input_size=3 * e, hidden_size=lstm_hidden,
+                            num_layers=1, batch_first=True)
 
     def forward(self, x):
         x = self.conv1(x); x = self.conv2(x); x = self.conv3(x)
@@ -78,8 +92,9 @@ class DeepLOBNet(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
-        self.backbone = DeepLOBBackbone()
-        self.head = FCNHead(64, cfg.head_hidden, cfg.head_depth,
+        self.backbone = DeepLOBBackbone(cfg.conv_channels,
+                                        cfg.inception_channels, cfg.lstm_hidden)
+        self.head = FCNHead(cfg.lstm_hidden, cfg.head_hidden, cfg.head_depth,
                             cfg.n_classes, cfg.head_dropout)
 
     def forward(self, x):

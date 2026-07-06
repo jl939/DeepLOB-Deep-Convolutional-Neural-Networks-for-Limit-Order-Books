@@ -42,6 +42,14 @@ def parse_args():
     g.add_argument("--head-hidden", type=int, default=None)
     g.add_argument("--head-depth", type=int, default=None)
     g.add_argument("--dropout", dest="head_dropout", type=float, default=None)
+    # deeplob backbone capacity (scales the MPO targets; defaults = paper)
+    g.add_argument("--conv-channels", dest="conv_channels", type=int, default=None,
+                   help="deeplob: channels in the 3 conv blocks (default 32)")
+    g.add_argument("--inception-channels", dest="inception_channels", type=int,
+                   default=None,
+                   help="deeplob: channels per inception branch (default 64)")
+    g.add_argument("--lstm-hidden", dest="lstm_hidden", type=int, default=None,
+                   help="deeplob: LSTM hidden / feature width (default 64)")
 
     g = p.add_argument_group("data")
     g.add_argument("--data-dir", default="jupyter_pytorch")
@@ -54,6 +62,18 @@ def parse_args():
     g.add_argument("--batch-size", type=int, default=None)
     g.add_argument("--lr", type=float, default=None)
     g.add_argument("--weight-decay", type=float, default=None)
+    g.add_argument("--eps", dest="adam_eps", type=float, default=None,
+                   help="ADAM epsilon (paper sets this to 1.0; default 1e-8)")
+    g.add_argument("--monitor", default="val_acc",
+                   choices=["val_loss", "val_acc", "val_f1_macro",
+                            "val_balanced_accuracy", "val_r2"],
+                   help="validation metric used for checkpoint selection")
+    g.add_argument("--early-stopping-patience", type=int, default=None,
+                   help="stop after this many epochs without monitor improvement")
+    g.add_argument("--min-delta", type=float, default=0.0,
+                   help="minimum monitor improvement required to reset patience")
+    g.add_argument("--label-smoothing", type=float, default=0.0,
+                   help="CrossEntropyLoss label smoothing")
     g.add_argument("--seed", type=int, default=None)
     g.add_argument("--device", default=None)
 
@@ -63,7 +83,14 @@ def parse_args():
     g.add_argument("--smoke", action="store_true",
                    help="tiny synthetic data + 2 epochs to verify the pipeline")
     add_wandb_args(p)
-    return p.parse_args()
+    args = p.parse_args()
+    if args.early_stopping_patience is not None and args.early_stopping_patience < 1:
+        p.error("--early-stopping-patience must be at least 1")
+    if args.min_delta < 0:
+        p.error("--min-delta must be non-negative")
+    if not 0 <= args.label_smoothing < 1:
+        p.error("--label-smoothing must be in [0, 1)")
+    return args
 
 
 def main():
@@ -73,10 +100,12 @@ def main():
         d_model=args.d_model, n_heads=args.n_heads, tf_depth=args.tf_depth,
         ff_mult=args.ff_mult, head_hidden=args.head_hidden,
         head_depth=args.head_depth, head_dropout=args.head_dropout,
+        conv_channels=args.conv_channels,
+        inception_channels=args.inception_channels, lstm_hidden=args.lstm_hidden,
         data_dir=args.data_dir, horizon_k=args.horizon_k, window_T=args.window_T,
         epochs=2 if args.smoke else args.epochs, batch_size=args.batch_size,
-        lr=args.lr, weight_decay=args.weight_decay, seed=args.seed,
-        device=args.device)
+        lr=args.lr, weight_decay=args.weight_decay, adam_eps=args.adam_eps,
+        seed=args.seed, device=args.device)
 
     out = args.out or f"checkpoints/{cfg.model}.pt"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
@@ -91,12 +120,19 @@ def main():
     run = init_wandb(
         args, cfg, job_type="train",
         extra_config={"checkpoint": out, "smoke": args.smoke,
-                      "parameters": n_params})
+                      "parameters": n_params, "monitor": args.monitor,
+                      "early_stopping_patience": args.early_stopping_patience,
+                      "min_delta": args.min_delta,
+                      "label_smoothing": args.label_smoothing})
 
     res = fit(model, train_loader, val_loader, epochs=cfg.epochs, lr=cfg.lr,
-              weight_decay=cfg.weight_decay, device=cfg.device,
-              ckpt_path=out, log_every=args.log_every,
-              metrics_logger=run.log if run else None)
+              weight_decay=cfg.weight_decay, adam_eps=cfg.adam_eps,
+              device=cfg.device, ckpt_path=out, log_every=args.log_every,
+              metrics_logger=run.log if run else None,
+              monitor=args.monitor,
+              early_stopping_patience=args.early_stopping_patience,
+              min_delta=args.min_delta,
+              label_smoothing=args.label_smoothing)
 
     model.load_state_dict(torch.load(out, map_location=cfg.device))
     test_loss, test_metrics = evaluate(
@@ -105,9 +141,14 @@ def main():
     log_metrics(run, "test", test_loss, test_metrics)
     if run:
         run.summary["best_val_accuracy"] = res["best_val_acc"]
+        run.summary["best_epoch"] = res["best_epoch"]
+        run.summary["best_monitor"] = res["best_monitor"]
+        run.summary["best_monitor_value"] = res["best_monitor_value"]
         run.summary["test_accuracy"] = test_acc
         run.summary["checkpoint"] = out
-    print(f"\nbest val acc: {res['best_val_acc']:.4f}   test acc: {test_acc:.4f}")
+    print(f"\nbest {res['best_monitor']}: {res['best_monitor_value']:.4f} "
+          f"at epoch {res['best_epoch']}   "
+          f"best val acc: {res['best_val_acc']:.4f}   test acc: {test_acc:.4f}")
 
     cfg_out = os.path.splitext(out)[0] + "_config.json"
     with open(cfg_out, "w") as f:
