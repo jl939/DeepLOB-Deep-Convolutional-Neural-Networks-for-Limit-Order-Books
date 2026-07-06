@@ -19,10 +19,12 @@ import os
 import sys
 
 import torch
+import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from deeplob_mpo import Config, build_model, count_parameters, fit, evaluate
 from deeplob_mpo.data import build_loaders, build_smoke_loaders
+from deeplob_mpo.wandb_utils import add_wandb_args, init_wandb, log_metrics
 
 
 def parse_args():
@@ -60,6 +62,7 @@ def parse_args():
     g.add_argument("--log-every", type=int, default=1)
     g.add_argument("--smoke", action="store_true",
                    help="tiny synthetic data + 2 epochs to verify the pipeline")
+    add_wandb_args(p)
     return p.parse_args()
 
 
@@ -82,18 +85,37 @@ def main():
         build_smoke_loaders(cfg) if args.smoke else build_loaders(cfg))
 
     model = build_model(cfg)
-    print(f"model={cfg.model}  params={count_parameters(model):,}  device={cfg.device}")
+    n_params = count_parameters(model)
+    print(f"model={cfg.model}  params={n_params:,}  device={cfg.device}")
+
+    run = init_wandb(
+        args, cfg, job_type="train",
+        extra_config={"checkpoint": out, "smoke": args.smoke,
+                      "parameters": n_params})
 
     res = fit(model, train_loader, val_loader, epochs=cfg.epochs, lr=cfg.lr,
               weight_decay=cfg.weight_decay, device=cfg.device,
-              ckpt_path=out, log_every=args.log_every)
+              ckpt_path=out, log_every=args.log_every,
+              metrics_logger=run.log if run else None)
 
     model.load_state_dict(torch.load(out, map_location=cfg.device))
-    _, test_acc = evaluate(model, test_loader, cfg.device)
+    test_loss, test_metrics = evaluate(
+        model, test_loader, cfg.device, nn.CrossEntropyLoss(), return_metrics=True)
+    test_acc = test_metrics["accuracy"]
+    log_metrics(run, "test", test_loss, test_metrics)
+    if run:
+        run.summary["best_val_accuracy"] = res["best_val_acc"]
+        run.summary["test_accuracy"] = test_acc
+        run.summary["checkpoint"] = out
     print(f"\nbest val acc: {res['best_val_acc']:.4f}   test acc: {test_acc:.4f}")
 
-    with open(os.path.splitext(out)[0] + "_config.json", "w") as f:
+    cfg_out = os.path.splitext(out)[0] + "_config.json"
+    with open(cfg_out, "w") as f:
         json.dump(cfg.to_dict(), f, indent=2)
+    if run:
+        run.save(out)
+        run.save(cfg_out)
+        run.finish()
     print(f"saved checkpoint -> {out}")
 
 

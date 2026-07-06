@@ -1,6 +1,7 @@
 .DS_Store
 checkpoints/
 __pycache__/
+wandb/
 
 # FI-2010 dataset (large, regenerable/downloadable — keep out of the repo)
 *.npy

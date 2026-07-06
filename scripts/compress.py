@@ -17,11 +17,13 @@ import os
 import sys
 
 import torch
+import torch.nn as nn
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from deeplob_mpo import (Config, build_model, count_parameters, compress_model,
                          format_report, fit, evaluate)
 from deeplob_mpo.data import build_loaders, build_smoke_loaders
+from deeplob_mpo.wandb_utils import add_wandb_args, init_wandb, log_metrics
 
 
 def parse_args():
@@ -46,6 +48,7 @@ def parse_args():
     p.add_argument("--device", default="cpu")
     p.add_argument("--out", default="checkpoints/compressed.pt")
     p.add_argument("--smoke", action="store_true")
+    add_wandb_args(p)
     return p.parse_args()
 
 
@@ -71,16 +74,34 @@ def main():
     before = count_parameters(model)
 
     if args.list_layers:
-        import torch.nn as nn
         for name, m in model.named_modules():
             if isinstance(m, nn.Linear):
                 print(f"{name:20s} {tuple(m.weight.shape)}  {m.weight.numel():,} params")
         return
 
+    run = init_wandb(
+        args, cfg, job_type="compress",
+        extra_config={
+            "checkpoint": args.ckpt,
+            "compressed_checkpoint": args.out,
+            "smoke": args.smoke,
+            "bond_dim": args.bond_dim,
+            "mpo_n_cores": args.n_cores,
+            "mpo_min_dim": args.min_dim,
+            "warm_start": not args.no_warm_start,
+            "finetune_epochs": 2 if args.smoke else args.finetune_epochs,
+            "finetune_lr": args.finetune_lr,
+            "parameters_before": before,
+        })
+
     include = [s.strip() for s in args.only.split(",")] if args.only else None
 
     # 2. reference accuracy
-    _, acc_ref = evaluate(model, test_loader, cfg.device)
+    criterion = nn.CrossEntropyLoss()
+    ref_loss, ref_metrics = evaluate(
+        model, test_loader, cfg.device, criterion, return_metrics=True)
+    acc_ref = ref_metrics["accuracy"]
+    log_metrics(run, "test/baseline", ref_loss, ref_metrics)
 
     # 3. MPO-compress the eligible Linear layers
     reports = compress_model(model, args.bond_dim, args.n_cores, args.min_dim,
@@ -89,10 +110,30 @@ def main():
     after = count_parameters(model)
     if not reports:
         print("no eligible Linear layers (try lowering --min-dim).")
+        if run:
+            run.finish()
         return
+    if run:
+        run.log({
+            "compression/parameters_before": before,
+            "compression/parameters_after": after,
+            "compression/parameters_kept": after / before,
+            "compression/size_reduction": before / max(after, 1),
+        })
+        for report in reports:
+            run.log({
+                "compression/layer_dense_params": report.dense_params,
+                "compression/layer_mpo_params": report.mpo_params,
+                "compression/layer_ratio": report.ratio,
+                "compression/layer_reconstruction_error": report.rel_err,
+                "compression/layer": report.name,
+            })
 
     # 4. accuracy right after compression (no fine-tuning)
-    _, acc_compressed = evaluate(model, test_loader, cfg.device)
+    compressed_loss, compressed_metrics = evaluate(
+        model, test_loader, cfg.device, criterion, return_metrics=True)
+    acc_compressed = compressed_metrics["accuracy"]
+    log_metrics(run, "test/compressed", compressed_loss, compressed_metrics)
 
     print(f"\nmodel={cfg.model}  bond_dim={args.bond_dim}  "
           f"warm_start={not args.no_warm_start}")
@@ -105,13 +146,26 @@ def main():
         fit(model, train_loader, val_loader,
             epochs=2 if args.smoke else args.finetune_epochs,
             lr=args.finetune_lr, weight_decay=cfg.weight_decay,
-            device=cfg.device, ckpt_path=args.out)
+            device=cfg.device, ckpt_path=args.out,
+            metrics_logger=run.log if run else None)
         model.load_state_dict(torch.load(args.out, map_location=cfg.device))
-        _, acc_final = evaluate(model, test_loader, cfg.device)
+        final_loss, final_metrics = evaluate(
+            model, test_loader, cfg.device, criterion, return_metrics=True)
+        acc_final = final_metrics["accuracy"]
+        log_metrics(run, "test/finetuned", final_loss, final_metrics)
+        if run:
+            run.summary["finetuned_test_accuracy"] = acc_final
+            run.save(args.out)
         print(f"after fine-tune          : {acc_final:.4f}")
 
     print(f"\ncompression: {before:,} -> {after:,} params "
           f"({after / before:.1%} kept, {before / max(after, 1):.1f}x smaller)")
+    if run:
+        run.summary["baseline_test_accuracy"] = acc_ref
+        run.summary["compressed_test_accuracy"] = acc_compressed
+        run.summary["parameters_before"] = before
+        run.summary["parameters_after"] = after
+        run.finish()
 
 
 if __name__ == "__main__":

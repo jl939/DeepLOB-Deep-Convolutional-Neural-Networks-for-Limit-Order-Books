@@ -12,10 +12,10 @@ from .config import Config
 from .mpo import MPOLinear, factorize
 from .models import DeepLOBNet, build_model, count_parameters
 from .compress import compress_model, mpoify_linear, format_report
-from .engine import fit, evaluate, train_one_epoch
+from .engine import classification_metrics, fit, evaluate, train_one_epoch
 
 __all__ = [
     "Config", "MPOLinear", "factorize", "DeepLOBNet", "build_model",
     "count_parameters", "compress_model", "mpoify_linear", "format_report",
-    "fit", "evaluate", "train_one_epoch",
+    "fit", "evaluate", "train_one_epoch", "classification_metrics",
 ]

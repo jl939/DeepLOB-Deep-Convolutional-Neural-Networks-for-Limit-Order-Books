@@ -14,6 +14,22 @@ python scripts/compress.py --ckpt checkpoints/mlp.pt --smoke
 That uses synthetic FI-2010-shaped data, so it checks that the code runs but
 does not measure useful accuracy.
 
+Weights & Biases logging is optional. Install and authenticate it once:
+
+```bash
+pip install wandb
+wandb login
+```
+
+Then add `--wandb` to either generic script:
+
+```bash
+python scripts/train.py --model mlp --device mps --epochs 50 --wandb
+python scripts/compress.py --ckpt checkpoints/mlp.pt --bond-dim 16 --wandb
+```
+
+Use `--wandb-mode offline` to log locally without syncing immediately.
+
 ## Important Modules
 
 The scripts are thin wrappers around the `deeplob_mpo` package:
@@ -98,6 +114,12 @@ Important options:
 | `--out` | Custom checkpoint path, default `checkpoints/<model>.pt`. |
 | `--log-every` | Print training progress every N epochs, default `1`. |
 | `--smoke` | Uses tiny random data and two epochs for a fast pipeline check. |
+| `--wandb` | Logs run config, train/validation/test metrics, and checkpoint files to W&B. |
+| `--wandb-project` | W&B project name. Default `deeplob-mpo`. |
+| `--wandb-entity` | Optional W&B team/user entity. |
+| `--wandb-run-name` | Optional human-readable run name. |
+| `--wandb-mode {online,offline,disabled}` | W&B mode when `--wandb` is enabled. |
+| `--wandb-tags` | Optional comma-separated W&B tags. |
 
 Model-specific options (only affect the matching `--model`, all default to the
 `Config` values in `deeplob_mpo/config.py` when omitted):
@@ -167,6 +189,16 @@ Important options:
 | `--batch-size` | Batch size override for compression/fine-tuning. |
 | `--out` | Output path for the fine-tuned compressed checkpoint. |
 | `--smoke` | Uses synthetic data for a fast end-to-end check. |
+| `--wandb` | Logs run config, baseline/compressed/fine-tuned metrics, parameter counts, per-layer compression stats, and checkpoint files to W&B. |
+| `--wandb-project` | W&B project name. Default `deeplob-mpo`. |
+| `--wandb-entity` | Optional W&B team/user entity. |
+| `--wandb-run-name` | Optional human-readable run name. |
+| `--wandb-mode {online,offline,disabled}` | W&B mode when `--wandb` is enabled. |
+| `--wandb-tags` | Optional comma-separated W&B tags. |
+
+Logged classification metrics include loss, accuracy, macro/weighted
+precision, macro/weighted recall, macro/weighted F1, balanced accuracy, and R2
+computed from predicted class labels.
 
 ### 5. Sweep Bond Dimensions Manually
 
