@@ -45,7 +45,7 @@ def parse_args():
     p.add_argument("--finetune-lr", type=float, default=5e-5)
     p.add_argument("--batch-size", type=int, default=None,
                    help="override batch size for fine-tune (larger = faster/steadier)")
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default=None)
     p.add_argument("--out", default="checkpoints/compressed.pt")
     p.add_argument("--smoke", action="store_true")
     add_wandb_args(p)

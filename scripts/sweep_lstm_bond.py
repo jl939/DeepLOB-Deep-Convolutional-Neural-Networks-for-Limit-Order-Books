@@ -38,7 +38,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--train-subset", type=int, default=40000)
     p.add_argument("--eval-subset", type=int, default=20000)
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default=None)
     args = p.parse_args()
 
     dev = args.device

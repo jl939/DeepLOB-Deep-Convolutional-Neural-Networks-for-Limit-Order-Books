@@ -4,6 +4,17 @@ This directory contains the command-line entry points for training models,
 compressing them with MPO layers, and running DeepLOB-specific compression
 experiments.
 
+## Installation
+
+Install dependencies from the repository root before running any script:
+
+```bash
+pip install -r requirements.txt
+```
+
+`wandb` is listed in `requirements.txt` but is only needed when you pass
+`--wandb` to a script. The core pipeline (`torch` + `numpy`) works without it.
+
 For a first hands-on pass, use the generic pipeline:
 
 ```bash
@@ -14,10 +25,9 @@ python scripts/compress.py --ckpt checkpoints/mlp.pt --smoke
 That uses synthetic FI-2010-shaped data, so it checks that the code runs but
 does not measure useful accuracy.
 
-Weights & Biases logging is optional. Install and authenticate it once:
+Weights & Biases logging is optional. Authenticate it once:
 
 ```bash
-pip install wandb
 wandb login
 ```
 

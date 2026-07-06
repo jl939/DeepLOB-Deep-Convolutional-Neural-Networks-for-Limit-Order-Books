@@ -55,7 +55,7 @@ def parse_args():
     g.add_argument("--lr", type=float, default=None)
     g.add_argument("--weight-decay", type=float, default=None)
     g.add_argument("--seed", type=int, default=None)
-    g.add_argument("--device", default="cpu")
+    g.add_argument("--device", default=None)
 
     g = p.add_argument_group("io")
     g.add_argument("--out", default=None, help="default checkpoints/<model>.pt")

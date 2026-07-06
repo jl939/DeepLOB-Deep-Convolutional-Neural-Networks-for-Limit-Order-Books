@@ -41,7 +41,7 @@ def main():
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--val-subset", type=int, default=10000,
                    help="cap the per-epoch validation check for speed")
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default=None)
     args = p.parse_args()
     dev, D = args.device, args.bond
 

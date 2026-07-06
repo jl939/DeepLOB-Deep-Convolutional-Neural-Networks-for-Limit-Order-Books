@@ -97,7 +97,7 @@ def main():
                    help="cap train windows for fine-tune (loop LSTM is slow)")
     p.add_argument("--eval-subset", type=int, default=20000,
                    help="cap val/test windows for evaluation")
-    p.add_argument("--device", default="cpu")
+    p.add_argument("--device", default=None)
     p.add_argument("--freeze-backbone", action="store_true",
                    help="train ONLY the compressed MPO layer; freeze the rest "
                         "(fewer trainable params -> much less overfitting)")
