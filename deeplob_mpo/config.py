@@ -1,6 +1,9 @@
 """Central configuration for training and MPO compression."""
 from __future__ import annotations
 from dataclasses import dataclass, asdict
+import torch as _torch
+
+_DEFAULT_DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
 
 
 @dataclass
@@ -37,7 +40,7 @@ class Config:
     epochs: int = 50
     lr: float = 1e-4
     weight_decay: float = 1e-5          # L2 reg, the paper's alpha term (Eq. 7)
-    device: str = "cpu"                 # "cuda" / "mps" / "cpu"
+    device: str = _DEFAULT_DEVICE       # "cuda" / "mps" / "cpu"
     seed: int = 0
 
     # -- MPO compression -------------------------------------------------------

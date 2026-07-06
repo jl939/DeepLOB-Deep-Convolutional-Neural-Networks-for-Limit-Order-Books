@@ -5,6 +5,10 @@ import torch
 import torch.nn as nn
 
 
+def _is_cuda(device) -> bool:
+    return str(device).startswith("cuda")
+
+
 def classification_metrics(preds, tgts, n_classes=None):
     """Dependency-free classification metrics for FI-2010's class labels."""
     preds = np.asarray(preds)
@@ -50,18 +54,26 @@ def classification_metrics(preds, tgts, n_classes=None):
     }
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device, return_metrics=False):
+def train_one_epoch(model, loader, optimizer, criterion, device,
+                    return_metrics=False, scaler=None):
     model.train()
     losses, preds, tgts = [], [], []
     n_classes = None
+    amp_ctx = torch.autocast("cuda") if scaler is not None else torch.autocast("cpu", enabled=False)
     for x, y in loader:
         x, y = x.to(device, dtype=torch.float), y.to(device, dtype=torch.long)
         optimizer.zero_grad()
-        out = model(x)
-        n_classes = out.shape[1]
-        loss = criterion(out, y)
-        loss.backward()
-        optimizer.step()
+        with amp_ctx:
+            out = model(x)
+            n_classes = out.shape[1]
+            loss = criterion(out, y)
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         losses.append(loss.item())
         if return_metrics:
             preds.append(out.detach().argmax(1).cpu().numpy())
@@ -78,12 +90,14 @@ def evaluate(model, loader, device, criterion=None, return_metrics=False):
     model.eval()
     losses, preds, tgts = [], [], []
     n_classes = None
+    amp_ctx = torch.autocast("cuda") if _is_cuda(device) else torch.autocast("cpu", enabled=False)
     for x, y in loader:
         x, y = x.to(device, dtype=torch.float), y.to(device, dtype=torch.long)
-        out = model(x)
-        n_classes = out.shape[1]
-        if criterion is not None:
-            losses.append(criterion(out, y).item())
+        with amp_ctx:
+            out = model(x)
+            n_classes = out.shape[1]
+            if criterion is not None:
+                losses.append(criterion(out, y).item())
         preds.append(out.argmax(1).cpu().numpy())
         tgts.append(y.cpu().numpy())
     preds, tgts = np.concatenate(preds), np.concatenate(tgts)
@@ -99,13 +113,17 @@ def fit(model, train_loader, val_loader, *, epochs, lr, weight_decay, device,
         ckpt_path=None, log_every=1, metrics_logger=None):
     """Train, tracking best val accuracy. Saves best state_dict to ckpt_path."""
     model.to(device)
+    if _is_cuda(device):
+        torch.backends.cudnn.benchmark = True
+    scaler = torch.amp.GradScaler("cuda") if _is_cuda(device) else None
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr,
                                  weight_decay=weight_decay)
     best_acc, history = float("-inf"), []
     for ep in range(1, epochs + 1):
         tr_loss, train_metrics = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, return_metrics=True)
+            model, train_loader, optimizer, criterion, device,
+            return_metrics=True, scaler=scaler)
         val_loss, val_metrics = evaluate(
             model, val_loader, device, criterion, return_metrics=True)
         val_acc = val_metrics["accuracy"]
