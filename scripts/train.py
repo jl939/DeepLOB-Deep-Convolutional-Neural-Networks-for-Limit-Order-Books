@@ -42,6 +42,14 @@ def parse_args():
     g.add_argument("--head-hidden", type=int, default=None)
     g.add_argument("--head-depth", type=int, default=None)
     g.add_argument("--dropout", dest="head_dropout", type=float, default=None)
+    # deeplob backbone capacity (scales the MPO targets; defaults = paper)
+    g.add_argument("--conv-channels", dest="conv_channels", type=int, default=None,
+                   help="deeplob: channels in the 3 conv blocks (default 32)")
+    g.add_argument("--inception-channels", dest="inception_channels", type=int,
+                   default=None,
+                   help="deeplob: channels per inception branch (default 64)")
+    g.add_argument("--lstm-hidden", dest="lstm_hidden", type=int, default=None,
+                   help="deeplob: LSTM hidden / feature width (default 64)")
 
     g = p.add_argument_group("data")
     g.add_argument("--data-dir", default="jupyter_pytorch")
@@ -54,6 +62,8 @@ def parse_args():
     g.add_argument("--batch-size", type=int, default=None)
     g.add_argument("--lr", type=float, default=None)
     g.add_argument("--weight-decay", type=float, default=None)
+    g.add_argument("--eps", dest="adam_eps", type=float, default=None,
+                   help="ADAM epsilon (paper sets this to 1.0; default 1e-8)")
     g.add_argument("--monitor", default="val_acc",
                    choices=["val_loss", "val_acc", "val_f1_macro",
                             "val_balanced_accuracy", "val_r2"],
@@ -90,10 +100,12 @@ def main():
         d_model=args.d_model, n_heads=args.n_heads, tf_depth=args.tf_depth,
         ff_mult=args.ff_mult, head_hidden=args.head_hidden,
         head_depth=args.head_depth, head_dropout=args.head_dropout,
+        conv_channels=args.conv_channels,
+        inception_channels=args.inception_channels, lstm_hidden=args.lstm_hidden,
         data_dir=args.data_dir, horizon_k=args.horizon_k, window_T=args.window_T,
         epochs=2 if args.smoke else args.epochs, batch_size=args.batch_size,
-        lr=args.lr, weight_decay=args.weight_decay, seed=args.seed,
-        device=args.device)
+        lr=args.lr, weight_decay=args.weight_decay, adam_eps=args.adam_eps,
+        seed=args.seed, device=args.device)
 
     out = args.out or f"checkpoints/{cfg.model}.pt"
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
@@ -114,8 +126,8 @@ def main():
                       "label_smoothing": args.label_smoothing})
 
     res = fit(model, train_loader, val_loader, epochs=cfg.epochs, lr=cfg.lr,
-              weight_decay=cfg.weight_decay, device=cfg.device,
-              ckpt_path=out, log_every=args.log_every,
+              weight_decay=cfg.weight_decay, adam_eps=cfg.adam_eps,
+              device=cfg.device, ckpt_path=out, log_every=args.log_every,
               metrics_logger=run.log if run else None,
               monitor=args.monitor,
               early_stopping_patience=args.early_stopping_patience,

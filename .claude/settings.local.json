@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(python scripts/train.py --model mlp --smoke)",
-      "Bash(python scripts/compress.py --smoke)"
+      "Bash(python scripts/compress.py --smoke)",
+      "Bash(python3 -c ' *)",
+      "Bash(python scripts/compress.py --ckpt checkpoints/deeplob_smoke.pt --smoke --device cpu --bond-dim 16 --min-dim 32 --compress-conv --compress-lstm --list-layers)",
+      "Bash(python scripts/compress.py --ckpt checkpoints/deeplob_smoke.pt --smoke --device cpu --bond-dim 16 --min-dim 32 --max-ratio 0.9 --compress-conv --compress-lstm --finetune-epochs 1 --out checkpoints/deeplob_smoke_mpo.pt)",
+      "Bash(python scripts/train.py --model mlp --smoke --device cpu --out checkpoints/mlp_smoke.pt)",
+      "Bash(python scripts/compress.py --ckpt checkpoints/mlp_smoke.pt --smoke --device cpu --bond-dim 16 --finetune-epochs 0)",
+      "Bash(python scripts/train.py --model deeplob --smoke --device cpu --head-depth 0 --out checkpoints/dl0.pt)",
+      "Bash(python scripts/compress.py --ckpt checkpoints/dl0.pt --smoke --device cpu --finetune-epochs 0)"
     ]
   }
 }

@@ -9,13 +9,13 @@ Modules:
   engine    train / evaluate / fit loops
 """
 from .config import Config
-from .mpo import MPOLinear, factorize
-from .models import DeepLOBNet, build_model, count_parameters
+from .mpo import MPOLinear, MPOConv2d, factorize
+from .models import DeepLOBNet, LinearLSTM, build_model, count_parameters
 from .compress import compress_model, mpoify_linear, format_report
 from .engine import classification_metrics, fit, evaluate, train_one_epoch
 
 __all__ = [
-    "Config", "MPOLinear", "factorize", "DeepLOBNet", "build_model",
-    "count_parameters", "compress_model", "mpoify_linear", "format_report",
-    "fit", "evaluate", "train_one_epoch", "classification_metrics",
+    "Config", "MPOLinear", "MPOConv2d", "factorize", "DeepLOBNet", "LinearLSTM",
+    "build_model", "count_parameters", "compress_model", "mpoify_linear",
+    "format_report", "fit", "evaluate", "train_one_epoch", "classification_metrics",
 ]

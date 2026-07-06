@@ -122,8 +122,9 @@ def _monitor_value(row: dict, monitor: str) -> tuple[float, bool]:
 
 
 def fit(model, train_loader, val_loader, *, epochs, lr, weight_decay, device,
-        ckpt_path=None, log_every=1, metrics_logger=None, monitor="val_acc",
-        early_stopping_patience=None, min_delta=0.0, label_smoothing=0.0):
+        adam_eps=1e-8, ckpt_path=None, log_every=1, metrics_logger=None,
+        monitor="val_acc", early_stopping_patience=None, min_delta=0.0,
+        label_smoothing=0.0):
     """Train, tracking the best validation metric.
 
     Saves the best state_dict to ckpt_path when provided. The default monitor
@@ -138,7 +139,7 @@ def fit(model, train_loader, val_loader, *, epochs, lr, weight_decay, device,
     scaler = torch.amp.GradScaler("cuda") if _is_cuda(device) else None
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     optimizer = torch.optim.Adam(raw_model.parameters(), lr=lr,
-                                 weight_decay=weight_decay)
+                                 weight_decay=weight_decay, eps=adam_eps)
     best_acc, best_score, best_epoch, history = float("-inf"), None, None, []
     epochs_without_improvement = 0
     for ep in range(1, epochs + 1):
