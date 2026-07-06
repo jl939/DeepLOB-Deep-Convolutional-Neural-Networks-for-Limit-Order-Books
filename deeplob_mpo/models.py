@@ -1,7 +1,10 @@
-"""Models for FI-2010. All MPO compression targets are plain nn.Linear layers,
-so deeplob_mpo.compress works on every architecture here unchanged.
+"""Models for FI-2010. MPO compression targets are nn.Linear and nn.Conv2d
+layers; the DeepLOB LSTM is reachable via LinearLSTM (its fused gate matrices
+re-expressed as nn.Linear). deeplob_mpo.compress works on every architecture
+here unchanged.
 
-  - DeepLOBNet     : CNN+LSTM backbone + wide FCN head  (head = MPO target)
+  - DeepLOBNet     : CNN+Inception+LSTM backbone + FCN head
+                     (LSTM gates + inception convs + head = MPO targets)
   - MLPNet         : flatten window -> wide MLP         (first Linear = MPO target)
   - TransformerNet : encoder over timesteps            (attn + FFN = MPO targets)
 """

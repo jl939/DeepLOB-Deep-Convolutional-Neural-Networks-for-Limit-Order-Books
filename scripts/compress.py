@@ -2,14 +2,19 @@
 """MPO-compress a trained model, then fine-tune to recover accuracy.
 
 Loads checkpoints/<model>.pt + its _config.json (written by train.py), replaces
-the eligible nn.Linear layers with warm-started MPOLinear, and reports the
-parameter/accuracy trade-off before and after a short fine-tune.
+the eligible layers with warm-started MPO factorizations, and reports the
+parameter/accuracy trade-off before and after a short fine-tune. Linear layers
+are compressed by default; add --compress-conv / --compress-lstm to also reach
+Conv2d kernels and the LSTM gate matrices (see --list-layers).
 
 Examples
 --------
   python scripts/compress.py --smoke
   python scripts/compress.py --ckpt checkpoints/mlp.pt --bond-dim 8 --device mps
   python scripts/compress.py --ckpt checkpoints/transformer.pt --bond-dim 16 --finetune-epochs 10
+  # DeepLOB backbone: LSTM gates + inception convs
+  python scripts/compress.py --ckpt checkpoints/deeplob.pt --bond-dim 16 \
+      --min-dim 32 --max-ratio 0.9 --compress-conv --compress-lstm
 """
 import argparse
 import json
