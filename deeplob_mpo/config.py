@@ -3,7 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 import torch as _torch
 
-_DEFAULT_DEVICE = "cuda" if _torch.cuda.is_available() else "cpu"
+
+def _detect_device() -> str:
+    if _torch.cuda.is_available():
+        return "cuda"
+    if hasattr(_torch.backends, "mps") and _torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+_DEFAULT_DEVICE = _detect_device()
 
 
 @dataclass
